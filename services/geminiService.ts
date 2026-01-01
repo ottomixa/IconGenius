@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { PromptEnhancementResponse } from "../types";
 
 // Helper to get a fresh client instance.
@@ -7,10 +7,20 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
+// Helper to extract base64 data from response
+const extractBase64Image = (response: GenerateContentResponse): string => {
+  if (response.candidates && response.candidates[0].content.parts) {
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData && part.inlineData.data) {
+        return part.inlineData.data;
+      }
+    }
+  }
+  throw new Error("No image data found in generation response.");
+};
+
 /**
  * Step 1: Use a lightweight text model to "think" about the icon request.
- * It refines the user's raw prompt into a detailed image generation prompt
- * and smartly decides the appropriate resolution size.
  */
 export const enhancePrompt = async (userPrompt: string): Promise<PromptEnhancementResponse> => {
   try {
@@ -67,15 +77,18 @@ export const enhancePrompt = async (userPrompt: string): Promise<PromptEnhanceme
 };
 
 /**
- * Step 2: Use the high-quality image model to generate the icon
- * based on the refined parameters.
+ * Step 2: Use the high-quality image model to generate the icon.
+ * Includes fallback to Flash model if Pro model fails (e.g. permission/quota).
  */
 export const generateIconImage = async (
   prompt: string,
   size: '1K' | '2K'
 ): Promise<string> => {
+  const ai = getAiClient();
+  
+  // Primary Attempt: High Quality (Pro)
   try {
-    const ai = getAiClient();
+    console.log("Attempting generation with gemini-3-pro-image-preview...");
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview', // High quality model for icons
       contents: {
@@ -89,19 +102,30 @@ export const generateIconImage = async (
       },
     });
 
-    // Extract image data
-    // The response can contain multiple parts, we look for inlineData
-    if (response.candidates && response.candidates[0].content.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData && part.inlineData.data) {
-          return part.inlineData.data; // This is the base64 string
-        }
-      }
-    }
+    return extractBase64Image(response);
 
-    throw new Error("No image data found in generation response.");
-  } catch (error) {
-    console.error("Error generating icon:", error);
-    throw error;
+  } catch (error: any) {
+    console.warn("Primary model failed (likely permission/billing). Attempting fallback to gemini-2.5-flash-image.", error);
+    
+    // Fallback Attempt: Fast (Flash)
+    // Note: Flash image does not support 'imageSize' param, so we omit it.
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: [{ text: prompt }],
+        },
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1",
+          },
+        },
+      });
+      return extractBase64Image(response);
+    } catch (fallbackError) {
+      console.error("Fallback model also failed.", fallbackError);
+      // If both fail, throw the original error as it is likely more descriptive of the root cause (e.g. bad API key)
+      throw error;
+    }
   }
 };
