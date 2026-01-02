@@ -21,6 +21,12 @@ export enum AppStatus {
   ERROR = 'ERROR'
 }
 
+export type ModelTier = 'free' | 'pro';
+
+export interface AppSettings {
+  modelTier: ModelTier;
+}
+
 declare global {
   interface AIStudio {
     hasSelectedApiKey: () => Promise<boolean>;

@@ -1,10 +1,14 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { PromptEnhancementResponse } from "../types";
+import { PromptEnhancementResponse, ModelTier } from "../types";
 
-// Helper to get a fresh client instance.
-// CRITICAL: Must be called right before API calls to ensure valid key.
+// Helper to get a client instance
 const getAiClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // The API key must be obtained exclusively from the environment variable process.env.API_KEY
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please select a key.");
+  }
+  return new GoogleGenAI({ apiKey });
 };
 
 // Helper to extract base64 data from response
@@ -26,7 +30,7 @@ export const enhancePrompt = async (userPrompt: string): Promise<PromptEnhanceme
   try {
     const ai = getAiClient();
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-preview',
       contents: `The user wants an icon generated. 
       User request: "${userPrompt}".
       
@@ -77,55 +81,53 @@ export const enhancePrompt = async (userPrompt: string): Promise<PromptEnhanceme
 };
 
 /**
- * Step 2: Use the high-quality image model to generate the icon.
- * Includes fallback to Flash model if Pro model fails (e.g. permission/quota).
+ * Step 2: Generate Icon
+ * Selects model based on Tier.
  */
 export const generateIconImage = async (
   prompt: string,
-  size: '1K' | '2K'
+  size: '1K' | '2K',
+  tier: ModelTier
 ): Promise<string> => {
   const ai = getAiClient();
   
-  // Primary Attempt: High Quality (Pro)
-  try {
-    console.log("Attempting generation with gemini-3-pro-image-preview...");
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview', // High quality model for icons
-      contents: {
-        parts: [{ text: prompt }],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "1:1", // Icons are square
-          imageSize: size,
-        },
-      },
-    });
-
-    return extractBase64Image(response);
-
-  } catch (error: any) {
-    console.warn("Primary model failed (likely permission/billing). Attempting fallback to gemini-2.5-flash-image.", error);
-    
-    // Fallback Attempt: Fast (Flash)
-    // Note: Flash image does not support 'imageSize' param, so we omit it.
+  // Configuration for PRO model (Paid/High Quality)
+  if (tier === 'pro') {
     try {
+      console.log("Generating with Pro model...");
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: prompt }],
-        },
+        model: 'gemini-3-pro-image-preview',
+        contents: { parts: [{ text: prompt }] },
         config: {
           imageConfig: {
             aspectRatio: "1:1",
+            imageSize: size,
           },
         },
       });
       return extractBase64Image(response);
-    } catch (fallbackError) {
-      console.error("Fallback model also failed.", fallbackError);
-      // If both fail, throw the original error as it is likely more descriptive of the root cause (e.g. bad API key)
+    } catch (error) {
+      console.warn("Pro model failed, check API key billing.", error);
       throw error;
     }
+  }
+
+  // Configuration for FREE/FLASH model
+  // Note: Flash image does not support 'imageSize' param.
+  try {
+    console.log("Generating with Flash model...");
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        imageConfig: {
+          aspectRatio: "1:1",
+        },
+      },
+    });
+    return extractBase64Image(response);
+  } catch (error) {
+    console.error("Flash model generation failed.", error);
+    throw error;
   }
 };

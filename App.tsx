@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { enhancePrompt, generateIconImage } from './services/geminiService';
-import { AppStatus, IconData, PromptEnhancementResponse } from './types';
+import { AppStatus, IconData, PromptEnhancementResponse, AppSettings } from './types';
 import { IconLibrary } from './components/IconLibrary';
+import { SettingsModal } from './components/SettingsModal';
 
 const App: React.FC = () => {
-  const [hasKey, setHasKey] = useState<boolean>(false);
-  const [isCheckingKey, setIsCheckingKey] = useState<boolean>(true);
+  // Settings State
+  const [settings, setSettings] = useState<AppSettings>(() => {
+    // Initial load from localStorage
+    const saved = localStorage.getItem('app_settings');
+    // Default to free if parsing fails
+    const parsed = saved ? JSON.parse(saved) : {};
+    return { modelTier: parsed.modelTier || 'free' };
+  });
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   const [prompt, setPrompt] = useState('');
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -14,25 +23,11 @@ const App: React.FC = () => {
   const [library, setLibrary] = useState<IconData[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Check for API Key on mount
-  useEffect(() => {
-    const checkKey = async () => {
-      try {
-        if (window.aistudio && window.aistudio.hasSelectedApiKey) {
-          const has = await window.aistudio.hasSelectedApiKey();
-          setHasKey(has);
-        } else {
-          // Fallback for environments without the wrapper (dev/local), assume true or handle gracefully
-          setHasKey(true); 
-        }
-      } catch (e) {
-        console.error("Error checking for API key:", e);
-      } finally {
-        setIsCheckingKey(false);
-      }
-    };
-    checkKey();
-  }, []);
+  // Persist settings
+  const handleSaveSettings = (newSettings: AppSettings) => {
+    setSettings(newSettings);
+    localStorage.setItem('app_settings', JSON.stringify(newSettings));
+  };
 
   // Load library from local storage on mount
   useEffect(() => {
@@ -51,18 +46,6 @@ const App: React.FC = () => {
     localStorage.setItem('icon_library', JSON.stringify(library));
   }, [library]);
 
-  const handleConnect = async () => {
-    try {
-      if (window.aistudio && window.aistudio.openSelectKey) {
-        await window.aistudio.openSelectKey();
-        // Race condition mitigation: assume success after the dialog flow
-        setHasKey(true);
-      }
-    } catch (e) {
-      console.error("Error selecting key:", e);
-    }
-  };
-
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
 
@@ -79,7 +62,11 @@ const App: React.FC = () => {
       setStatus(AppStatus.GENERATING_IMAGE);
 
       // Step 2: Generate Image
-      const base64Data = await generateIconImage(enhancement.refinedPrompt, enhancement.suggestedSize);
+      const base64Data = await generateIconImage(
+          enhancement.refinedPrompt, 
+          enhancement.suggestedSize, 
+          settings.modelTier
+      );
 
       const newIcon: IconData = {
         id: crypto.randomUUID(),
@@ -87,7 +74,7 @@ const App: React.FC = () => {
         originalPrompt: prompt,
         base64Data: base64Data,
         createdAt: Date.now(),
-        size: enhancement.suggestedSize,
+        size: settings.modelTier === 'pro' ? enhancement.suggestedSize : '1K',
       };
 
       setCurrentIcon(newIcon);
@@ -97,9 +84,9 @@ const App: React.FC = () => {
       const msg = err.message || "Something went wrong during generation.";
       setErrorMsg(msg);
       
-      // If the error suggests the key is invalid or not found (404/403 often related to missing project context)
-      if (msg.includes("Requested entity was not found") || msg.includes("403")) {
-        setHasKey(false); // Force re-selection
+      // If permission denied or missing key, suggest checking settings
+      if (msg.includes("403") || msg.includes("Requested entity was not found") || msg.includes("API Key is missing")) {
+         setIsSettingsOpen(true);
       }
     }
   };
@@ -136,52 +123,20 @@ const App: React.FC = () => {
         suggestedSize: icon.size,
         styleDescription: 'From Library'
     });
-    // Scroll to top to see preview
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-
-  // Loading State
-  if (isCheckingKey) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full"></div>
-      </div>
-    );
-  }
-
-  // Not Authenticated State (No Key Selected)
-  if (!hasKey) {
-    return (
-      <div className="min-h-screen bg-black bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900 via-zinc-950 to-black text-zinc-100 flex flex-col items-center justify-center p-4">
-        <div className="w-16 h-16 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 mb-8">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-          </svg>
-        </div>
-        <h1 className="text-4xl font-extrabold tracking-tight text-center mb-4">Welcome to IconGenius</h1>
-        <p className="text-zinc-400 text-lg max-w-md text-center mb-10">
-          Connect your Google Cloud project to access the high-fidelity image generation models.
-        </p>
-        <button 
-          onClick={handleConnect}
-          className="bg-white text-black hover:bg-zinc-200 px-8 py-3 rounded-xl font-bold transition-all hover:scale-105 active:scale-95 shadow-lg shadow-white/10 flex items-center gap-2"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-          Connect Google AI Studio
-        </button>
-        <p className="mt-8 text-xs text-zinc-600">
-           Read more about billing and access in the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="underline hover:text-zinc-400">documentation</a>.
-        </p>
-      </div>
-    );
-  }
 
   // Main App
   return (
     <div className="min-h-screen bg-black bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900 via-zinc-950 to-black text-zinc-100 selection:bg-indigo-500/30">
       
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)}
+        onSave={handleSaveSettings}
+        currentSettings={settings}
+      />
+
       {/* Navbar */}
       <header className="fixed top-0 w-full z-50 border-b border-zinc-800 bg-black/50 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -194,10 +149,18 @@ const App: React.FC = () => {
             <span className="font-bold text-xl tracking-tight">IconGenius</span>
           </div>
           <div className="flex items-center gap-4">
-             <button onClick={handleConnect} className="text-xs font-mono text-zinc-500 hover:text-zinc-300 transition-colors">
-               Change API Key
+             <button 
+                onClick={() => setIsSettingsOpen(true)}
+                className="group flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/50 hover:bg-zinc-800 text-xs font-medium text-zinc-400 hover:text-white transition-all"
+             >
+               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-zinc-500 group-hover:text-indigo-400 transition-colors" viewBox="0 0 20 20" fill="currentColor">
+                 <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+               </svg>
+               Settings
              </button>
-             <div className="text-xs font-mono text-zinc-500 border-l border-zinc-800 pl-4">Powered by Gemini 3</div>
+             <div className="hidden sm:block text-xs font-mono text-zinc-600 border-l border-zinc-800 pl-4">
+                {settings.modelTier === 'pro' ? 'Pro Model' : 'Free Model'}
+             </div>
           </div>
         </div>
       </header>
@@ -282,15 +245,15 @@ const App: React.FC = () => {
             
             {errorMsg && (
               <div className="p-4 bg-red-900/20 border border-red-900/50 text-red-300 rounded-xl flex items-center gap-3">
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                  </svg>
-                 <span>
+                 <span className="text-sm">
                     {errorMsg}
-                    {(errorMsg.includes("403") || errorMsg.includes("Requested entity was not found")) && (
-                        <span className="ml-2 block text-sm mt-1 text-red-400">
-                            Try reconnecting your API key.
-                        </span>
+                    {(errorMsg.includes("403") || errorMsg.includes("Key")) && (
+                        <button onClick={() => setIsSettingsOpen(true)} className="ml-2 underline hover:text-red-200">
+                           Check Settings
+                        </button>
                     )}
                  </span>
               </div>
