@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { PromptEnhancementResponse, ModelTier } from "../types";
+import { PromptEnhancementResponse, ModelTier, IconType } from "../types";
 
 // Helper to get a client instance
 const getAiClient = () => {
@@ -26,20 +26,38 @@ const extractBase64Image = (response: GenerateContentResponse): string => {
 /**
  * Step 1: Use a lightweight text model to "think" about the icon request.
  */
-export const enhancePrompt = async (userPrompt: string): Promise<PromptEnhancementResponse> => {
+export const enhancePrompt = async (userPrompt: string, iconType: IconType = 'standard'): Promise<PromptEnhancementResponse> => {
   try {
     const ai = getAiClient();
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-preview',
-      contents: `The user wants an icon generated. 
+    
+    let promptContext = `The user wants an icon generated. 
       User request: "${userPrompt}".
       
       Your task:
-      1. Act as an expert AI art director. Refine this request into a highly detailed, comma-separated image generation prompt suitable for an app icon or system icon. Focus on keywords like "vector", "minimalist", "3d render", "gradient", "centered", "white background" (or transparent if implied), "high fidelity".
+      1. Act as an expert AI art director. Refine this request into a highly detailed, comma-separated image generation prompt suitable for an app icon or system icon. Focus on keywords like "vector", "minimalist", "3d render", "gradient", "centered", "white background" (or transparent if implied), "high fidelity".`;
+
+    if (iconType === 'chrome_extension') {
+      promptContext += `
+      
+      CRITICAL CHROME EXTENSION GUIDELINES:
+      - The icon MUST be front-facing (no dramatic perspective).
+      - The actual icon content should be centered and occupy about 75-80% of the canvas width (leaving transparent/white padding).
+      - Avoid large drop shadows.
+      - If the icon is dark, suggest a subtle white outer glow.
+      - Ensure high contrast and recognizability at small sizes.
+      - Add "isolated on white background" to the prompt to ensure clean edges.
+      `;
+    }
+
+    promptContext += `
       2. Decide the best size. If the user asks for "high quality", "4k", "detailed", or "large", choose "2K". Otherwise, default to "1K".
       3. Provide a short description of the style you chose.
 
-      Return ONLY JSON.`,
+      Return ONLY JSON.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: promptContext,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -73,7 +91,7 @@ export const enhancePrompt = async (userPrompt: string): Promise<PromptEnhanceme
     console.error("Error enhancing prompt:", error);
     // Fallback if the smart enhancement fails
     return {
-      refinedPrompt: `A high quality app icon, ${userPrompt}, vector style, white background`,
+      refinedPrompt: `A high quality app icon, ${userPrompt}, vector style, white background${iconType === 'chrome_extension' ? ', front-facing, centered with padding' : ''}`,
       suggestedSize: '1K',
       styleDescription: 'Standard'
     };

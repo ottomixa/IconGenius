@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AppSettings, ModelTier } from '../types';
+import { AppSettings, ModelTier, IconType } from '../types';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -15,18 +15,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   currentSettings,
 }) => {
   const [tier, setTier] = useState<ModelTier>(currentSettings.modelTier);
+  const [iconType, setIconType] = useState<IconType>(currentSettings.iconType || 'standard');
   
   // Sync state when opening
   useEffect(() => {
     if (isOpen) {
       setTier(currentSettings.modelTier);
+      setIconType(currentSettings.iconType || 'standard');
     }
   }, [isOpen, currentSettings]);
 
   if (!isOpen) return null;
 
   const handleSave = () => {
-    onSave({ modelTier: tier });
+    onSave({ modelTier: tier, iconType });
     onClose();
   };
 
@@ -83,6 +85,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               >
                 <div className="font-semibold text-sm">Pro</div>
                 <div className="text-xs text-zinc-400 mt-1">High Quality</div>
+              </button>
+            </div>
+          </div>
+
+          {/* Icon Type Selection */}
+          <div className="space-y-3">
+            <label className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Icon Type</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setIconType('standard')}
+                className={`p-3 rounded-xl border text-left transition-all ${
+                  iconType === 'standard' 
+                  ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' 
+                  : 'bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="font-semibold text-sm">Standard</div>
+                <div className="text-xs text-zinc-400 mt-1">General purpose</div>
+              </button>
+              
+              <button
+                onClick={() => setIconType('chrome_extension')}
+                className={`p-3 rounded-xl border text-left transition-all ${
+                  iconType === 'chrome_extension' 
+                  ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-lg shadow-indigo-500/10' 
+                  : 'bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                }`}
+              >
+                <div className="font-semibold text-sm">Chrome Ext</div>
+                <div className="text-xs text-zinc-400 mt-1">Web Store Optimized</div>
               </button>
             </div>
           </div>

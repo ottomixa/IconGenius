@@ -3,6 +3,7 @@ import { enhancePrompt, generateIconImage } from './services/geminiService';
 import { AppStatus, IconData, PromptEnhancementResponse, AppSettings } from './types';
 import { IconLibrary } from './components/IconLibrary';
 import { SettingsModal } from './components/SettingsModal';
+import { IconPreviewMatrix } from './components/IconPreviewMatrix';
 
 const App: React.FC = () => {
   // Settings State
@@ -11,7 +12,10 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('app_settings');
     // Default to free if parsing fails
     const parsed = saved ? JSON.parse(saved) : {};
-    return { modelTier: parsed.modelTier || 'free' };
+    return { 
+      modelTier: parsed.modelTier || 'free',
+      iconType: parsed.iconType || 'standard'
+    };
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -22,6 +26,10 @@ const App: React.FC = () => {
   const [enhancementData, setEnhancementData] = useState<PromptEnhancementResponse | null>(null);
   const [library, setLibrary] = useState<IconData[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // Auth State
+  const [user, setUser] = useState<any>(null);
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
 
   // Persist settings
   const handleSaveSettings = (newSettings: AppSettings) => {
@@ -29,22 +37,75 @@ const App: React.FC = () => {
     localStorage.setItem('app_settings', JSON.stringify(newSettings));
   };
 
-  // Load library from local storage on mount
+  // Check auth status on mount
   useEffect(() => {
-    const saved = localStorage.getItem('icon_library');
-    if (saved) {
+    const checkAuth = async () => {
       try {
-        setLibrary(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse library", e);
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const userData = await res.json();
+          setUser(userData);
+          fetchLibrary();
+        }
+      } catch (error) {
+        console.error("Auth check failed", error);
       }
-    }
+    };
+    checkAuth();
+
+    // Listen for auth success from popup
+    const handleMessage = (event: MessageEvent) => {
+        if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
+            checkAuth();
+        }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  // Save library to local storage whenever it changes
-  useEffect(() => {
-    localStorage.setItem('icon_library', JSON.stringify(library));
-  }, [library]);
+  const handleLogin = async () => {
+    try {
+      const res = await fetch('/api/auth/url');
+      const { url } = await res.json();
+      window.open(url, 'google_login', 'width=500,height=600');
+    } catch (error) {
+      console.error("Login failed", error);
+    }
+  };
+
+  const handleLogout = async () => {
+      try {
+          await fetch('/api/auth/logout', { method: 'POST' });
+          setUser(null);
+          setLibrary([]);
+      } catch (error) {
+          console.error("Logout failed", error);
+      }
+  };
+
+  const fetchLibrary = async () => {
+    setIsLibraryLoading(true);
+    try {
+      const res = await fetch('/api/drive/list');
+      if (res.ok) {
+        const files = await res.json();
+        // Transform Drive files to IconData
+        const driveIcons: IconData[] = files.map((f: any) => ({
+            id: f.id,
+            prompt: f.name.replace('icon-genius-', '').replace('.png', ''), // Simple name parsing
+            originalPrompt: f.name, // We don't have the original prompt stored perfectly yet
+            base64Data: `/api/drive/file/${f.id}`, // Use proxy URL
+            createdAt: new Date(f.createdTime).getTime(),
+            size: '1K' // Default
+        }));
+        setLibrary(driveIcons);
+      }
+    } catch (error) {
+      console.error("Failed to fetch library", error);
+    } finally {
+      setIsLibraryLoading(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
@@ -56,7 +117,7 @@ const App: React.FC = () => {
 
     try {
       // Step 1: Enhance Prompt
-      const enhancement = await enhancePrompt(prompt);
+      const enhancement = await enhancePrompt(prompt, settings.iconType);
       setEnhancementData(enhancement);
       
       setStatus(AppStatus.GENERATING_IMAGE);
@@ -91,27 +152,71 @@ const App: React.FC = () => {
     }
   };
 
-  const saveToLibrary = () => {
-    if (currentIcon) {
-        // Prevent duplicates
-        if (!library.some(i => i.id === currentIcon.id)) {
-            setLibrary(prev => [currentIcon, ...prev]);
+  const saveToLibrary = async () => {
+    if (!currentIcon) return;
+    if (!user) {
+        handleLogin();
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/drive/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: `icon-genius-${currentIcon.originalPrompt.substring(0, 30).replace(/[^a-z0-9]/gi, '_')}-${Date.now()}.png`,
+                base64Data: currentIcon.base64Data,
+                mimeType: 'image/png'
+            })
+        });
+
+        if (res.ok) {
+            // Refresh library
+            fetchLibrary();
+            alert("Saved to Google Drive!");
+        } else {
+            alert("Failed to save to Drive.");
         }
+    } catch (error) {
+        console.error("Save failed", error);
+        alert("Error saving to Drive.");
     }
   };
 
   const downloadIcon = () => {
     if (currentIcon) {
       const link = document.createElement('a');
-      link.href = `data:image/png;base64,${currentIcon.base64Data}`;
-      link.download = `icon-genius-${currentIcon.id}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      
+      // If Chrome Extension type, resize to 128x128
+      if (settings.iconType === 'chrome_extension') {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.onload = () => {
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, 128, 128);
+            link.href = canvas.toDataURL('image/png');
+            link.download = `icon-genius-chrome-${currentIcon.id}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }
+        };
+        img.src = `data:image/png;base64,${currentIcon.base64Data}`;
+      } else {
+        link.href = `data:image/png;base64,${currentIcon.base64Data}`;
+        link.download = `icon-genius-${currentIcon.id}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
     }
   };
 
   const handleDelete = (id: string) => {
+    // Deletion not implemented for Drive yet in this iteration
     setLibrary(prev => prev.filter(icon => icon.id !== id));
   };
 
@@ -149,6 +254,17 @@ const App: React.FC = () => {
             <span className="font-bold text-xl tracking-tight">IconGenius</span>
           </div>
           <div className="flex items-center gap-4">
+             {user ? (
+                 <div className="flex items-center gap-3">
+                     <img src={user.picture} alt={user.name} className="w-8 h-8 rounded-full border border-zinc-700" />
+                     <button onClick={handleLogout} className="text-xs text-zinc-400 hover:text-white">Logout</button>
+                 </div>
+             ) : (
+                 <button onClick={handleLogin} className="text-xs font-medium bg-white text-black px-3 py-1.5 rounded-lg hover:bg-zinc-200 transition-colors">
+                     Login with Google
+                 </button>
+             )}
+             
              <button 
                 onClick={() => setIsSettingsOpen(true)}
                 className="group flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-800/50 hover:bg-zinc-800 text-xs font-medium text-zinc-400 hover:text-white transition-all"
@@ -262,36 +378,34 @@ const App: React.FC = () => {
 
           {/* Right Column: Preview Area */}
           <div className="relative">
-             <div className={`relative aspect-square w-full max-w-md mx-auto rounded-3xl overflow-hidden border-2 transition-all duration-500 ${
-                 status === AppStatus.SUCCESS || currentIcon 
-                 ? 'border-zinc-700 shadow-2xl shadow-indigo-500/10' 
-                 : 'border-zinc-800 border-dashed bg-zinc-900/30'
-             }`}>
-                
-                {currentIcon ? (
-                  <img 
-                    src={`data:image/png;base64,${currentIcon.base64Data}`} 
-                    alt="Generated Icon" 
-                    className="w-full h-full object-cover animate-fade-in"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600">
-                    {status === AppStatus.GENERATING_IMAGE ? (
-                        <div className="text-center space-y-4">
-                           <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto"></div>
-                           <p className="animate-pulse text-indigo-400 font-medium">Creating masterpiece...</p>
-                        </div>
-                    ) : (
-                        <>
-                           <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                           </svg>
-                           <p>Your icon will appear here</p>
-                        </>
-                    )}
-                  </div>
-                )}
-             </div>
+             {currentIcon ? (
+                <IconPreviewMatrix 
+                    base64Data={currentIcon.base64Data} 
+                    originalPrompt={currentIcon.originalPrompt} 
+                />
+             ) : (
+                <div className={`relative aspect-square w-full max-w-md mx-auto rounded-3xl overflow-hidden border-2 transition-all duration-500 ${
+                    status === AppStatus.GENERATING_IMAGE
+                    ? 'border-zinc-700 shadow-2xl shadow-indigo-500/10' 
+                    : 'border-zinc-800 border-dashed bg-zinc-900/30'
+                }`}>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-600">
+                        {status === AppStatus.GENERATING_IMAGE ? (
+                            <div className="text-center space-y-4">
+                                <div className="w-16 h-16 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto"></div>
+                                <p className="animate-pulse text-indigo-400 font-medium">Creating masterpiece...</p>
+                            </div>
+                        ) : (
+                            <>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                <p>Your icon will appear here</p>
+                            </>
+                        )}
+                    </div>
+                </div>
+             )}
 
              {/* Actions */}
              {currentIcon && (
@@ -305,7 +419,7 @@ const App: React.FC = () => {
                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                      <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
                    </svg>
-                   Save to Library
+                   Save Source to Drive
                  </button>
                  <button 
                    onClick={downloadIcon}
@@ -314,7 +428,7 @@ const App: React.FC = () => {
                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                    </svg>
-                   Download
+                   Download Source
                  </button>
                </div>
              )}
@@ -328,6 +442,8 @@ const App: React.FC = () => {
             icons={library} 
             onDelete={handleDelete}
             onSelect={handleSelectFromLibrary}
+            isLoading={isLibraryLoading}
+            isAuthenticated={!!user}
         />
 
       </main>

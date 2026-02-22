@@ -5,9 +5,32 @@ interface IconLibraryProps {
   icons: IconData[];
   onDelete: (id: string) => void;
   onSelect: (icon: IconData) => void;
+  isLoading?: boolean;
+  isAuthenticated?: boolean;
 }
 
-export const IconLibrary: React.FC<IconLibraryProps> = ({ icons, onDelete, onSelect }) => {
+export const IconLibrary: React.FC<IconLibraryProps> = ({ icons, onDelete, onSelect, isLoading, isAuthenticated }) => {
+  if (!isAuthenticated) {
+    return (
+      <div className="text-center py-12 text-zinc-500 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-800">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+        <p className="text-lg font-medium">Login to view your library</p>
+        <p className="text-sm">Connect your Google account to save and access your icons.</p>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="text-center py-12 text-zinc-500">
+        <div className="w-8 h-8 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mx-auto mb-4"></div>
+        <p>Loading your library...</p>
+      </div>
+    );
+  }
+
   if (icons.length === 0) {
     return (
       <div className="text-center py-12 text-zinc-500 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-800">
@@ -37,7 +60,7 @@ export const IconLibrary: React.FC<IconLibraryProps> = ({ icons, onDelete, onSel
               onClick={() => onSelect(icon)}
             >
               <img
-                src={`data:image/png;base64,${icon.base64Data}`}
+                src={icon.base64Data.startsWith('http') ? icon.base64Data : `data:image/png;base64,${icon.base64Data}`}
                 alt={icon.originalPrompt}
                 className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-500"
               />
@@ -51,18 +74,7 @@ export const IconLibrary: React.FC<IconLibraryProps> = ({ icons, onDelete, onSel
                     </p>
                     <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">{icon.size}</span>
                 </div>
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(icon.id);
-                    }}
-                    className="ml-2 text-zinc-400 hover:text-red-400 transition-colors"
-                    title="Delete"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                </button>
+                {/* Delete button removed for Drive items for now as it requires more complex logic */}
             </div>
           </div>
         ))}
