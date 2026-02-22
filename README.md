@@ -39,16 +39,28 @@ To enable the Google Drive features, you must configure Google OAuth credentials
 5.  **Create Credentials**:
     -   Go to **Credentials** > **Create Credentials** > **OAuth client ID**.
     -   Select **Web application**.
-    -   Add your application's URL to **Authorized JavaScript origins**.
-    -   Add the redirect URI to **Authorized redirect URIs**:
+    -   **Authorized JavaScript origins**:
+        Add the following URLs to allow the app to run in AI Studio:
         ```
-        <YOUR_APP_URL>/auth/callback
+        https://ais-dev-zwpnpsabt2ldwdkej7f6y2-111419205929.europe-west2.run.app
+        https://ais-pre-zwpnpsabt2ldwdkej7f6y2-111419205929.europe-west2.run.app
         ```
-        (e.g., `https://your-app-id.run.app/auth/callback` or `http://localhost:3000/auth/callback` for local development).
+    -   **Authorized redirect URIs**:
+        Add the following callback URLs:
+        ```
+        https://ais-dev-zwpnpsabt2ldwdkej7f6y2-111419205929.europe-west2.run.app/auth/callback
+        https://ais-pre-zwpnpsabt2ldwdkej7f6y2-111419205929.europe-west2.run.app/auth/callback
+        ```
 6.  **Set Environment Variables**:
     -   Copy the **Client ID** and **Client Secret**.
     -   Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in your environment variables.
     -   Set `APP_URL` to your application's root URL.
+7.  **Add Test Users** (Crucial for Development):
+    -   Since your app is likely in "Testing" mode, you must explicitly add users who can log in.
+    -   Go to **OAuth consent screen** > **Test users**.
+    -   Click **+ ADD USERS**.
+    -   Enter your email address (e.g., `otto.mixa@gmail.com`) and any other emails you want to test with.
+    -   Click **SAVE**.
 
 ## Usage
 

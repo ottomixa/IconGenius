@@ -81,16 +81,35 @@ async function startServer() {
       // Send success message to parent window (popup)
       res.send(`
         <html>
+          <head>
+            <title>Auth Success</title>
+            <style>
+              body { background: #18181b; color: #e4e4e7; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+              .card { background: #27272a; padding: 2rem; border-radius: 12px; border: 1px solid #3f3f46; text-align: center; max-width: 400px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+              h2 { margin-top: 0; color: #fff; margin-bottom: 0.5rem; }
+              p { color: #a1a1aa; margin-bottom: 1.5rem; line-height: 1.5; }
+              button { background: #4f46e5; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: 500; cursor: pointer; transition: background 0.2s; font-size: 0.875rem; }
+              button:hover { background: #4338ca; }
+            </style>
+          </head>
           <body>
+            <div class="card">
+              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom: 1rem; display: inline-block;">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+              <h2>Authentication Successful</h2>
+              <p>You have successfully logged in. You can now close this window and return to IconGenius.</p>
+              <button onclick="window.close()">Close Window</button>
+            </div>
             <script>
+              // Notify the opener
               if (window.opener) {
                 window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-                window.close();
-              } else {
-                window.location.href = '/';
+                // Attempt to close automatically after a brief delay
+                setTimeout(() => window.close(), 1500);
               }
             </script>
-            <p>Authentication successful. You can close this window.</p>
           </body>
         </html>
       `);
